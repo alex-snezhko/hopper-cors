@@ -60,7 +60,7 @@ record OptionInternal {
   allowMethods: List<Hopper.Method>,
   allowHeaders: List<String>,
   exposeHeaders: List<String>,
-  maxAge: Option<Number>
+  maxAge: Option<Number>,
 }
 
 let originHeaders = (allowOrigin, reqOrigin) => {
@@ -74,63 +74,64 @@ let originHeaders = (allowOrigin, reqOrigin) => {
     AllowOriginPredicate(fn) => {
       if (fn(reqOrigin)) [(acao, reqOrigin), vo] else [vo]
     },
-    _ => []
+    _ => [],
+  }
+}
+
+let listHeader = (name, option) => {
+  match (option) {
+    [] => [],
+    _ => [(name, List.join(",", option))],
   }
 }
 
 let preflightHeaders = (options, reqOrigin) => {
   // TODO add allow credential if WAGI gets auth support
   let allowedMethods = List.map(Hopper.methodToString, options.allowMethods)
-  let headers = [
-    ("Access-Control-Allow-Methods", List.join(",", allowedMethods)),
-    ("Access-Control-Allow-Headers", List.join(",", options.allowHeaders)),
-    ...originHeaders(options.allowOrigin, reqOrigin)
-  ]
 
-  let headers = match (options.maxAge) {
-    Some(maxAge) => [("Access-Control-Max-Age", toString(maxAge)), ...headers],
-    None => headers
+  let acao = originHeaders(options.allowOrigin, reqOrigin)
+  let acam = listHeader("Access-Control-Allow-Methods", allowedMethods)
+  let acah = listHeader("Access-Control-Allow-Headers", options.allowHeaders)
+  let acma = match (options.maxAge) {
+    Some(maxAge) => [("Access-Control-Max-Age", toString(maxAge))],
+    None => [],
   }
-  Map.fromList(headers)
+  List.reduce(List.append, [], [acao, acam, acah, acma])
 }
 
 let normalHeaders = (options, reqOrigin) => {
-  let headers = originHeaders(options.allowOrigin, reqOrigin)
-  let aceh = "Access-Control-Expose-Headers"
-  match (options.exposeHeaders) {
-    [] => headers,
-		_ => [(aceh, List.join(",", options.exposeHeaders)), ...headers]
-	}
+  let acao = originHeaders(options.allowOrigin, reqOrigin)
+  let aceh = listHeader("Access-Control-Expose-Headers", options.exposeHeaders)
+  List.append(aceh, acao)
 }
 
 let getOptions = optionsList => {
-  let (o, m, h, eh, ma) = List.reduce(
-    ((o, m, h, eh, ma), this) => {
-      match (this) {
-        AllowOrigin(x) => (Option.or(o, Some(x)), m, h, eh, ma),
-        AllowMethods(x) => (o, Option.or(m, Some(x)), h, eh, ma),
-        AllowHeaders(x) => (o, m, Option.or(h, Some(x)), eh, ma),
-        ExposeHeaders(x) => (o, m, h, Option.or(eh, Some(x)), ma),
-        MaxAge(x) => (o, m, h, eh, Option.or(ma, Some(x))),
-      }
-    },
-    (None, None, None, None, None),
-    optionsList
-  )
+  let (o, m, h, eh, ma) = List.reduce(((o, m, h, eh, ma), this) => {
+    match (this) {
+      AllowOrigin(x) => (Option.or(o, Some(x)), m, h, eh, ma),
+      AllowMethods(x) => (o, Option.or(m, Some(x)), h, eh, ma),
+      AllowHeaders(x) => (o, m, Option.or(h, Some(x)), eh, ma),
+      ExposeHeaders(x) => (o, m, h, Option.or(eh, Some(x)), ma),
+      MaxAge(x) => (o, m, h, eh, Option.or(ma, Some(x))),
+    }
+  }, (None, None, None, None, None), optionsList)
 
   {
     allowOrigin: Option.unwrapWithDefault(Origins(["*"]), o),
-    allowMethods: Option.unwrapWithDefault([
-      Hopper.Get,
-      Hopper.Head,
-      Hopper.Put,
-      Hopper.Patch,
-      Hopper.Post,
-      Hopper.Delete
-    ], m),
+    allowMethods: Option.unwrapWithDefault(
+      [
+        Hopper.Get,
+        Hopper.Head,
+        Hopper.Put,
+        Hopper.Patch,
+        Hopper.Post,
+        Hopper.Delete,
+      ],
+      m
+    ),
     allowHeaders: Option.unwrapWithDefault(["*"], h),
     exposeHeaders: Option.unwrapWithDefault([], eh),
-    maxAge: ma
+    maxAge: ma,
   }
 }
 
@@ -141,8 +142,6 @@ let getOptions = optionsList => {
  * @returns A middleware that enables handling of CORS requests on routes
  */
 export let withCors = options => next => req => {
-  Hopper.log(Hopper.method(req))
-  Hopper.log(Map.toList(Hopper.headers(req)))
   // CORS requests will have an "Origin" header
   let reqOrigin = Hopper.header("Origin", req)
   match (reqOrigin) {
@@ -150,7 +149,7 @@ export let withCors = options => next => req => {
       let options = getOptions(options)
       if (Hopper.method(req) == Hopper.Options) {
         // handle CORS preflight request
-        let headers = preflightHeaders(options, reqOrigin)
+        let headers = Map.fromList(preflightHeaders(options, reqOrigin))
         Hopper.response(Hopper.NoContent, headers, "")
       } else {
         let res = next(req)
@@ -160,6 +159,6 @@ export let withCors = options => next => req => {
         Hopper.newHeaders(resHeaders, res)
       }
     },
-    None => next(req)
+    None => next(req),
   }
 }

@@ -1,0 +1,51 @@
+import * from "./grain-test"
+import Hopper from "../hopper"
+import Cors from "../hopper-cors"
+import Map from "map"
+import List from "list"
+
+let makeRequest = (method) => {
+  _message: {
+    _wagiEnv: Map.fromList([("REQUEST_METHOD", method)]),
+    _params: Map.make(),
+    _query: Map.make()
+  },
+  _headers: Map.fromList([("Origin", "localhost:3000")]),
+  _body: "",
+  _variables: Map.make()
+}: Hopper.Request
+
+let acao = "access-control-allow-origin"
+let acam = "access-control-allow-methods"
+let acah = "access-control-allow-headers"
+let acma = "access-control-max-age"
+let aceh = "access-control-expose-headers"
+let vo = ("vary", "Origin")
+let ct = ("content-type", "text/plain")
+
+testMultiple("cors", [
+  ("GET", [], [ct, (acao, "*")]),
+  ("GET", [Cors.AllowOrigin(Cors.Origins(["localhost:3000"]))], [ct, (acao, "localhost:3000"), vo]),
+  ("GET", [Cors.AllowOrigin(Cors.Origins([]))], [ct]),
+  ("GET", [Cors.AllowOrigin(Cors.AllowOriginPredicate(o => o == "localhost:3000"))], [ct, (acao, "localhost:3000"), vo]),
+  ("GET", [Cors.AllowOrigin(Cors.AllowOriginPredicate(o => o != "localhost:3000"))], [ct, vo]),
+  ("GET", [Cors.ExposeHeaders(["Hello", "Header-1"])], [ct, (acao, "*"), (aceh, "Hello,Header-1")]),
+  ("OPTIONS", [Cors.AllowHeaders([]), Cors.AllowMethods([])], [(acao, "*")]),
+  ("OPTIONS", [], [(acao, "*"), (acam, "GET,HEAD,PUT,PATCH,POST,DELETE"), (acah, "*")]),
+  (
+    "OPTIONS",
+    [
+      Cors.AllowOrigin(Cors.Origins(["localhost:3000"])),
+      Cors.AllowHeaders(["Hello", "Header-1"]),
+      Cors.MaxAge(10),
+      Cors.AllowMethods([Hopper.Get])
+    ],
+    [(acao, "localhost:3000"), vo, (acam, "GET"), (acma, "10"), (acah, "Hello,Header-1")]
+  ),
+], ((method, options, resHeaders)) => {
+  let req = makeRequest(method)
+  let res = Cors.withCors(options)(req => Hopper.text(""))(req)
+  let headers = List.sort(compare, Map.toList(Hopper.headers(res)))
+  let expectedHeaders = List.sort(compare, resHeaders)
+  assertThat(headers, equals(expectedHeaders))
+})
